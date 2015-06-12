@@ -1,0 +1,10 @@
+{
+  "name": "beep.js",
+  "version": "0.0.0",
+  "description": "beep.js",
+  "main": "app.js",
+  "author": {
+    "name": "tientm",
+    "email": ""
+  }
+}
