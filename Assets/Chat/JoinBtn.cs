@@ -9,7 +9,7 @@ public class JoinBtn : MonoBehaviour
     // Use this for initialization 
     public void OnSubmit()
     {
-        NetworkManager.Instance.Login(NGUIText.StripSymbols(usernameInput.value));
+        StartCoroutine(NetworkManager.Instance.Login(NGUIText.StripSymbols(usernameInput.value)));
         usernameInput.value = "";
 
         /*

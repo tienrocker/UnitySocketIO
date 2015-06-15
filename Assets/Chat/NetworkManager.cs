@@ -17,17 +17,17 @@ public class NetworkManager : MonoBehaviour
 
     // Use this for initialization
     public SocketIOComponent socket;
-    public string SocketID;
+    public bool isLogingIn = false;
     public GameObject LoginPanel;
     public GameObject ChatPanel;
-    public UILabel ChatContent;
+    public UITextList ChatContent;
 
     public bool isAutoChat = false;
-    private string UserName;
+    public string UserName;
 
     public List<string> DictionaryQuote = new List<string>();
 
-    public IEnumerator Start()
+    public void Start()
     {
         DictionaryQuote.Add("All great movements are popular movements. They are the volcanic eruptions of human passions and emotions, stirred into activity by the ruthless Goddess of Distress or by the torch of the spoken word cast into the midst of the people.");
         DictionaryQuote.Add("Great liars are also great magicians.");
@@ -41,26 +41,30 @@ public class NetworkManager : MonoBehaviour
         DictionaryQuote.Add("The art of leadership... consists in consolidating the attention of the people against a single adversary and taking care that nothing will split up that attention.");
         DictionaryQuote.Add("It is always more difficult to fight against faith than against knowledge.");
 
-        while (!socket.IsConnected)
-            yield return new WaitForSeconds(0.05f);
-
-        socket.On("open", OnOpen);
-        socket.On("message", OnMessage);
-        socket.On("error", OnError);
-        socket.On("close", OnCLose);
-
         LoginPanel.SetActive(true);
         ChatPanel.SetActive(false);
     }
 
-    public void Login(string username)
+    public IEnumerator Login(string username)
     {
+        if (isLogingIn) yield return null;
+        isLogingIn = true;
+        socket.autoConnect = false;
+
+        if (!socket.IsConnected) socket.Connect();
+        while (!socket.IsConnected) yield return new WaitForSeconds(0.05f);
+
+        socket.On("open", (SocketIOEvent e) => { Debug.Log("[OnOpen] received: " + e.name + " " + e.data); });
+        socket.On("error", (SocketIOEvent e) => { Debug.Log("[OnError] Error received: " + e.name + " " + e.data); });
+        socket.On("close", (SocketIOEvent e) => { Debug.Log("[OnClose]: " + e.name + " " + e.data); });
+
+        yield return new WaitForSeconds(0.05f);
+
         JSONObject user = new JSONObject();
-        if (isAutoChat)
-            username = GenerateName(Random.Range(4, 7));
+        if (isAutoChat) username = GenerateName(Random.Range(4, 7));
 
         user.AddField("username", username);
-        socket.Emit("login", user);
+        socket.Emit("login", user, OnLogin);
         UserName = username;
 
         if (isAutoChat)
@@ -71,73 +75,56 @@ public class NetworkManager : MonoBehaviour
     {
         JSONObject content = new JSONObject();
         content.AddField("text", text);
-        socket.Emit("chat", content);
+        socket.Emit("chat", content, OnChat);
     }
 
     public IEnumerator AutoChat()
     {
-        System.Random rnd = new System.Random();
-        JSONObject content = new JSONObject();
-        content.AddField("text", DictionaryQuote[rnd.Next(DictionaryQuote.Count)]);
-        socket.Emit("chat", content);
-
+        Chat(DictionaryQuote[Random.Range(0, DictionaryQuote.Count)]);
         yield return new WaitForSeconds(0.5f);
         StartCoroutine("AutoChat");
     }
 
-    void OnMessage(SocketIOEvent e)
+    void OnLogin(JSONObject e)
     {
-        ProcessMessage(e);
-    }
-
-    void ProcessMessage(SocketIOEvent e)
-    {
-        Result result = new Result(new JSONObject(e.data.ToString()));
-
-        if (result.log != null)
-            Debug.LogFormat("[SocketIO-{0}] {1}", result.messagetype.ToString(), result.log);
-
-        if (result.messagetype == Result.messageType.LOGIN)
+        if (e == true)
         {
-            SocketID = result.from;
             LoginPanel.SetActive(false);
             ChatPanel.SetActive(true);
-            ChatContent.text = string.Format("[009900]{0} joined[-]\n{1}", result.content, ChatContent.text);
-        }
 
-        if (result.messagetype == Result.messageType.CHAT)
+            socket.On("join", OnJoin);
+            socket.On("message", OnMessage);
+        }
+        else
         {
-            if (UserName == "Admin")
-            {
-                ChatContent.text = string.Format("[99ff00]{0}:[-] {1}\n{2}", result.from, result.log, ChatContent.text);
-            }
-            else
-            {
-                ChatContent.text = string.Format("[99ff00]{0}:[-] {1}\n{2}", result.from, result.content, ChatContent.text);
-            }
-
+            Logout();
         }
     }
 
-    #region default function
-    void OnOpen(SocketIOEvent e)
+    void OnChat(JSONObject e)
     {
-        Debug.Log("[SocketIO-OnOpen] Error received: " + e.name + " " + e.data);
-        if (UserName != null)
-            Login(UserName);
+        if (e == true) { Debug.Log("Message sent"); } else { Debug.Log("Message can\'t send"); }
     }
 
-    void OnError(SocketIOEvent e)
+    void OnMessage(SocketIOEvent e)
     {
-        Debug.Log("[SocketIO-OnError] Error received: " + e.name + " " + e.data);
+        ChatContent.Add(new ChatResult(new JSONObject(e.data.ToString())).ToString());
     }
 
-    void OnCLose(SocketIOEvent e)
+    void OnJoin(SocketIOEvent e)
     {
-        Debug.Log("[SocketIO-OnCLose] Error received: " + e.name + " " + e.data);
-        ChatContent.text = string.Format("[FF0000]Disconnected[-]\n{2}");
+        ChatContent.Add(new ChatResult(new JSONObject(e.data.ToString())).ToString());
     }
-    #endregion default function
+
+    public void Logout()
+    {
+        // close socket
+        socket.Close();
+
+        LoginPanel.SetActive(true);
+        ChatPanel.SetActive(false);
+        UserName = null;
+    }
 
     public static string GenerateName(int len)
     {
@@ -157,57 +144,5 @@ public class NetworkManager : MonoBehaviour
         }
 
         return Name;
-    }
-}
-
-class Result
-{
-    public enum messageType { ERROR, CONNECT, LOGIN, NOTIFY, CHAT };
-    public messageType messagetype = messageType.ERROR;
-    public string from;
-    public string content;
-    public string log;
-
-    public Result(JSONObject obj)
-    {
-        messagetype = (messageType)obj.GetField("messagetype").n;
-        from = obj.GetField("from").str;
-        content = obj.GetField("content").str;
-        log = obj.GetField("log").str;
-    }
-
-    void accessData(JSONObject obj)
-    {
-        switch (obj.type)
-        {
-            case JSONObject.Type.OBJECT:
-                for (int i = 0; i < obj.list.Count; i++)
-                {
-                    string key = (string)obj.keys[i];
-                    JSONObject j = (JSONObject)obj.list[i];
-                    Debug.Log(key);
-                    accessData(j);
-                }
-                break;
-            case JSONObject.Type.ARRAY:
-                foreach (JSONObject j in obj.list)
-                {
-                    accessData(j);
-                }
-                break;
-            case JSONObject.Type.STRING:
-                Debug.Log(obj.str);
-                break;
-            case JSONObject.Type.NUMBER:
-                Debug.Log(obj.n);
-                break;
-            case JSONObject.Type.BOOL:
-                Debug.Log(obj.b);
-                break;
-            case JSONObject.Type.NULL:
-                Debug.Log("NULL");
-                break;
-
-        }
     }
 }

@@ -1,58 +1,52 @@
-var io = require('socket.io')({
-    transports: ['websocket'],
-});
+var io = require('socket.io')({ transports: ['websocket'] }),
+	users = [];
 
-var i = 0;
-var users = [];
-var messageType = {
-    ERROR : 0,
-    CONNECT : 1,
-    LOGIN : 2,
-    NOTIFY : 3,
-    CHAT : 4
-};
-
-function message(messagetype, from, content, log) {
+function message(username, message) {
     
     var result = {
-        messagetype : null,
-        from : null,
-        content : null,
-        log : null
+        username : null,
+        message : null
     };
     
-    result.messagetype = messagetype;
-    result.from = from;
-    result.content = content;
-    result.log = log;
+    result.username = username;
+    result.message = message;
     
     return result;
 }
 
 io.on('connection', function (socket) {
-    
-    socket.on('login', function (user) {
-        users[socket.id] = user;
-        socket.emit('message', message(messageType.LOGIN, socket.id, user.username, '[login] ' + user.username));
-        socket.broadcast.emit('message', message(messageType.LOGIN, null, user.username, '[login] ' + user.username));
+
+	socket.on('error', function (err) { console.error(err.stack);});
+	
+    socket.on('login', function (user, callback) {
+		if(users[user.username] === undefined){
+		
+			socket.username = user.username;
+			users[user.username] = socket;
+		
+			socket.broadcast.emit('join', message( user.username, "joined"));
+			if(callback) callback(true);
+		} else {
+		
+			if(callback) callback('Error! Username existed');
+		}
     });
     
-    socket.on('chat', function (content) {
-        if (users.hasOwnProperty(socket.id)) {
-			i++; 
-			var messcontent = message(messageType.CHAT, users[socket.id].username, content.text, '[chat-no] ' + i);
-			socket.emit('message', messcontent);
-			socket.broadcast.emit('message', messcontent);
+    socket.on('chat', function (data, callback) {
+        if (socket.username !== undefined) {
+			var messcontent = message(socket.username, data.text);
+			io.sockets.emit('message', messcontent);	// send to all user include logged user
+			if(callback) callback(true);
         } else {
-            socket.emit('message', message(messageType.ERROR, socket.id, socket.id, '[chat-error] ' + socket.id));
+            if(callback) callback('Error! Username not logged');
         }
     });
-    
+
     socket.on('disconnect', function () {
-        if (users.hasOwnProperty(socket.id)) {
-            delete users[socket.id];
-        }
+		if(socket.username !== undefined && users[socket.username] === undefined) return;
+		delete users[socket.username];
     });
+	
 });
 
 io.attach(4567);
